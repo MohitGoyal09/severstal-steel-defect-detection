@@ -10,7 +10,10 @@ Uses **segmentation-models-pytorch** with EfficientNet-B5 and SE-ResNeXt encoder
 
 - **Python**: 3.12 or newer (tested on 3.14)
 - **Data**: Kaggle competition dataset with `train_images/`, `test_images/`, `train.csv`
-- **Hardware**: CUDA GPU (Linux/Windows) or Apple Silicon MPS (macOS) or CPU
+- **Hardware**:
+  - **Windows/Linux**: NVIDIA GPU with CUDA 11.8+ or 12.x
+  - **macOS**: Apple Silicon (MPS) or Intel (CPU)
+  - **Fallback**: CPU-only mode works on all platforms
 
 ---
 
@@ -37,6 +40,82 @@ pip install -e .
 ```
 
 > **Note**: On macOS with Apple Silicon, PyTorch will use the MPS backend automatically. On CUDA systems, install the CUDA-enabled PyTorch wheels from [pytorch.org](https://pytorch.org).
+
+---
+
+## Windows + CUDA Setup
+
+### 1. Install CUDA-enabled PyTorch
+
+```bash
+# For CUDA 12.1 (recommended)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# For CUDA 11.8
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+```
+
+Check your CUDA version with `nvidia-smi` in Command Prompt.
+
+### 2. Install remaining dependencies
+
+```bash
+pip install segmentation-models-pytorch efficientnet_pytorch
+pip install albumentations opencv-python pandas numpy scipy matplotlib
+pip install tensorboard tqdm pyyaml click scikit-learn jupyter
+pip install -e .
+```
+
+### 3. Activate virtual environment (Windows syntax)
+
+```bash
+.venv\Scripts\activate
+```
+
+### 4. Update config for Windows paths
+
+Edit `experiments/unet-b5.yml` (or any config). Change the data path:
+
+```yaml
+data_loader:
+  args:
+    data_dir: C:/Users/YourName/Code/IEEE/data
+```
+
+Forward slashes work in YAML. If you use backslashes, quote the path:
+
+```yaml
+    data_dir: "C:\\Users\\YourName\\Code\\IEEE\\data"
+```
+
+### 5. Adjust epochs (Windows commands)
+
+The `sed` command doesn't exist on Windows. Use one of these instead:
+
+**PowerShell:**
+```powershell
+(Get-Content experiments/unet-b5.yml) -replace 'epochs: 250', 'epochs: 5' | Set-Content experiments/unet-b5.yml
+```
+
+**Python (cross-platform):**
+```bash
+python -c "import yaml; c=yaml.safe_load(open('experiments/unet-b5.yml')); c['training']['epochs']=5; yaml.dump(c, open('experiments/unet-b5.yml','w'), default_flow_style=False)"
+```
+
+### 6. Run training
+
+```bash
+sever train -c experiments/unet-b5.yml
+```
+
+### Windows-specific tips
+
+| Issue | Solution |
+|-------|----------|
+| `BrokenPipeError` or DataLoader crashes | Reduce `nworkers` to `0` or `2` in the config |
+| Out of memory | Reduce `batch_size` (try `8` or `4`) |
+| CUDA not found | Reinstall PyTorch with the correct `--index-url` for your CUDA version |
+| Very slow on first epoch | Normal — CUDA kernel compilation happens once |
 
 ---
 

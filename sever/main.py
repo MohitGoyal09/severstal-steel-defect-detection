@@ -36,13 +36,20 @@ class Runner:
         self.logger.debug('Building model architecture')
         model = get_instance(module_arch, 'arch', config)
 
-        device_ids = list(range(torch.cuda.device_count()))
-        self.logger.debug(f'Using device {device_id} of {device_ids}')
-        device = torch.device(f'cuda:{device_id}')
-        torch.cuda.set_device(device)
-        model = model.to(device)
+        if torch.cuda.is_available():
+            device_ids = list(range(torch.cuda.device_count()))
+            self.logger.debug(f'Using CUDA device {device_id} of {device_ids}')
+            device = torch.device(f'cuda:{device_id}')
+            torch.cuda.set_device(device)
+            torch.backends.cudnn.benchmark = True  # consistent input sizes
+        elif torch.backends.mps.is_available():
+            self.logger.debug('Using MPS device')
+            device = torch.device('mps')
+        else:
+            self.logger.debug('Using CPU')
+            device = torch.device('cpu')
 
-        torch.backends.cudnn.benchmark = True  # consistent input sizes
+        model = model.to(device)
 
         self.logger.debug('Building optimizer and lr scheduler')
 
@@ -123,7 +130,8 @@ class Runner:
         os.environ['PYTHONHASHSEED'] = str(seed)
         np.random.seed(seed)
         torch.manual_seed(seed)
-        torch.cuda.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
 
     def _resume_checkpoint(self, resume_path, model, optimizer):
         """

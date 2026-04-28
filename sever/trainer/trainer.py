@@ -113,7 +113,8 @@ class Trainer(BaseTrainer):
         del data
         del target
         del output
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         self.writer.add_scalar('epoch/loss', losses_comb.avg)
         self.writer.add_scalar('epoch/bce',  losses_bce.avg)
@@ -180,7 +181,8 @@ class Trainer(BaseTrainer):
         del data
         del target
         del output
-        torch.cuda.empty_cache()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
         self.writer.set_step((epoch), 'valid')
         self.writer.add_scalar('loss', losses_comb.avg)

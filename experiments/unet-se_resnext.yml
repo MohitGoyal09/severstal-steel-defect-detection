@@ -11,7 +11,7 @@ arch:
     dropout: 0.1
     encoder_name: se_resnext50_32x4d
     encoder_weights: imagenet
-    in_channels: r
+    in_channels: 1
 
 augmentation:
   type: HeavyCropTransforms
@@ -20,11 +20,10 @@ augmentation:
     width: 448
 
 data_loader:
-  type: SteelSegPseudoDataLoader
+  type: SteelSegDataLoader
   args:
-    alpha: -0.15
     batch_size: 32
-    data_dir: data/raw/severstal-steel-defect-detection
+    data_dir: /Users/mohit/Code/IEEE/data
     nworkers: 8
     shuffle: true
     validation_split: 0.2

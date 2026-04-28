@@ -90,7 +90,8 @@ ENV/
 # Spyder project settings
 .spyderproject
 .spyproject
-
+.pi
+.pi-lens
 # Rope project settings
 .ropeproject
 

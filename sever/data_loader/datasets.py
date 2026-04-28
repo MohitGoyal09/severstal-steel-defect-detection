@@ -45,8 +45,8 @@ class SteelDatasetPseudo(SteelDataset):
         _, img = self.read_greyscale(idx)
         augmented = self.transforms(image=img, mask=mask)
         img = augmented['image']
-        mask = augmented['mask']  # 1x256x1600x4
-        mask = mask[0].permute(2, 0, 1)  # 1x4x256x1600
+        mask = augmented['mask']
+        mask = mask.permute(2, 0, 1)
         return img, mask
 
 
@@ -63,8 +63,8 @@ class SteelDatasetTrainVal(SteelDataset):
         _, img = self.read_greyscale(idx)
         augmented = self.transforms(image=img, mask=mask)
         img = augmented['image']
-        mask = augmented['mask']  # 1x256x1600x4
-        mask = mask[0].permute(2, 0, 1)  # 1x4x256x1600
+        mask = augmented['mask']
+        mask = mask.permute(2, 0, 1)
         return img, mask
 
 
@@ -95,6 +95,6 @@ class SteelClasDatasetPseudo(SteelDataset):
         _, img = self.read_greyscale(idx)
         augmented = self.transforms(image=img, mask=mask)
         img = augmented['image']
-        mask = augmented['mask']  # 1x256x1600x4
-        targets = np.array([mask[:, :, :, c].sum() > 0 for c in range(4)], dtype=np.float32)
+        mask = augmented['mask']
+        targets = np.array([mask[:, :, c].sum() > 0 for c in range(4)], dtype=np.float32)
         return img, targets

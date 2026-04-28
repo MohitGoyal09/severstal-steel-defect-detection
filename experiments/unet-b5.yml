@@ -11,7 +11,7 @@ arch:
     dropout: 0.1
     encoder_name: efficientnet-b5
     encoder_weights: imagenet
-    in_channels: r
+    in_channels: 1
     weight_std: false
 
 augmentation:
@@ -21,11 +21,10 @@ augmentation:
     width: 384
 
 data_loader:
-  type: SteelSegPseudoDataLoader
+  type: SteelSegDataLoader
   args:
-    alpha: -0.15
     batch_size: 18
-    data_dir: data/raw/severstal-steel-defect-detection
+    data_dir: /Users/mohit/Code/IEEE/data
     nworkers: 8
     shuffle: true
     validation_split: 0.2

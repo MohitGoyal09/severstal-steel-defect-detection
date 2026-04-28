@@ -5,24 +5,22 @@ from copy import deepcopy
 import numpy as np
 import cv2
 
-from albumentations.pytorch import ToTensor
+from albumentations.pytorch import ToTensorV2
 from albumentations import (
     HorizontalFlip,
     VerticalFlip,
-    Flip,
     Normalize,
     Compose,
-    RandomContrast,
-    RandomBrightness,
+    RandomBrightnessContrast,
     RandomSizedCrop,
-    Cutout,
+    CoarseDropout,
     RandomCrop,
     RandomRotate90,
     CropNonEmptyMaskIfExists,
     OneOf,
     ImageOnlyTransform,
     GaussianBlur,
-    IAASharpen,
+    Sharpen,
 )
 
 
@@ -50,7 +48,7 @@ class AugmentationBase(abc.ABC):
     def build_test(self):
         return Compose([
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
     def notimplemented(self, *args, **kwargs):
@@ -72,7 +70,7 @@ class LightTransforms(AugmentationBase):
         return Compose([
             HorizontalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 
@@ -86,9 +84,8 @@ class MediumTransforms(AugmentationBase):
             HorizontalFlip(p=0.5),
             VerticalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            RandomContrast(p=0.1),
-            RandomBrightness(p=0.1),
-            ToTensor(),
+            RandomBrightnessContrast(p=0.1),
+            ToTensorV2(),
         ])
 
 
@@ -102,11 +99,10 @@ class HeavyTransforms(AugmentationBase):
             HorizontalFlip(p=0.5),
             VerticalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            RandomContrast(p=0.2),
-            RandomBrightness(p=0.2),
+            RandomBrightnessContrast(p=0.2),
             RandomSizedCrop((240, 256), self.H, self.W, w2h_ratio=1600 / 256),
-            Cutout(max_h_size=32, max_w_size=32),
-            ToTensor(),
+            CoarseDropout(num_holes_range=(1, 1), hole_height_range=(32, 32), hole_width_range=(32, 32), fill=0),
+            ToTensorV2(),
         ])
 
 
@@ -120,7 +116,7 @@ class RandomCropTransforms(AugmentationBase):
             RandomCrop(self.H, self.H),
             HorizontalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 
@@ -132,10 +128,10 @@ class RandomCropMediumTransforms(AugmentationBase):
     def build_train(self):
         return Compose([
             RandomCrop(self.H, self.H),
-            Flip(p=0.5),
+            HorizontalFlip(p=0.5),
             RandomRotate90(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 
@@ -147,9 +143,9 @@ class RandomCrop256x400Transforms(AugmentationBase):
     def build_train(self):
         return Compose([
             RandomCrop(self.H, 416),
-            Flip(p=0.5),
+            HorizontalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 
@@ -169,11 +165,11 @@ class HeavyCropTransforms(AugmentationBase):
             OneOf([
                 CLAHE(p=0.5),  # modified source to get this to work
                 GaussianBlur(3, p=0.3),
-                IAASharpen(alpha=(0.2, 0.3), p=0.3),
+                Sharpen(alpha=(0.2, 0.3), p=0.3),
             ], p=1),
-            Flip(p=0.5),
+            HorizontalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 
@@ -193,18 +189,18 @@ class HeavyCropClasTransforms(AugmentationBase):
             OneOf([
                 CLAHE(p=0.5),  # modified source to get this to work
                 GaussianBlur(3, p=0.3),
-                IAASharpen(alpha=(0.2, 0.3), p=0.3),
+                Sharpen(alpha=(0.2, 0.3), p=0.3),
             ], p=1),
-            Flip(p=0.5),
+            HorizontalFlip(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
     def build_test(self):
         return Compose([
             RandomCrop(self.height, self.width),  # not fully conv, so need to limit img size
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 
@@ -216,10 +212,10 @@ class MaskCropTransforms(AugmentationBase):
     def build_train(self):
         return Compose([
             CropNonEmptyMaskIfExists(self.H, self.H),
-            Flip(p=0.5),
+            HorizontalFlip(p=0.5),
             RandomRotate90(p=0.5),
             Normalize(mean=self.MEAN, std=self.STD),
-            ToTensor(),
+            ToTensorV2(),
         ])
 
 

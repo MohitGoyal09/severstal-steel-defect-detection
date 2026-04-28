@@ -24,7 +24,8 @@ setup(
     author="Karl Hornlund",
     author_email="karlhornlund@gmail.com",
     description="https://www.kaggle.com/c/severstal-steel-defect-detection/overview",
-    long_description=read("README.rst"),
+    long_description=read("README.md"),
+    long_description_content_type="text/markdown",
     packages=find_packages(exclude=('tests',)),
     entry_points={
         'console_scripts': [

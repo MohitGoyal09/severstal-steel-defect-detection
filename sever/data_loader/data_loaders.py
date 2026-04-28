@@ -9,18 +9,32 @@ from .datasets import (
     SteelDatasetTrainVal,
     SteelDatasetTest,
     SteelDatasetPseudo,
-    SteelClasDatasetPseudo
+    SteelClasDatasetPseudo,
+    SyntheticDefectDataset,
+    MixedSeverstalDataset,
 )
 from .sampling import SamplerFactory
 
 
 class SteelSegDataLoader(DataLoader):
+    train_csv = "train.csv"
+    test_csv = "sample_submission.csv"
 
-    train_csv = 'train.csv'
-    test_csv  = 'sample_submission.csv'
-
-    def __init__(self, transforms, data_dir, batch_size, shuffle,
-                 validation_split, nworkers, pin_memory=True, train=True, alpha=None, balance=None
+    def __init__(
+        self,
+        transforms,
+        data_dir,
+        batch_size,
+        shuffle,
+        validation_split,
+        nworkers,
+        pin_memory=True,
+        train=True,
+        alpha=None,
+        balance=None,
+        use_synthetic=False,
+        synthetic_ratio=0.3,
+        synthetic_root="./synthetic",
     ):  # noqa
         self.transforms, self.shuffle = transforms, shuffle
         self.bs, self.nworkers, self.pin_memory = batch_size, nworkers, pin_memory
@@ -29,54 +43,79 @@ class SteelSegDataLoader(DataLoader):
         self.train_df, self.val_df = self.load_df(train, validation_split)
 
         if train:
-            dataset = SteelDatasetTrainVal(self.train_df, self.data_dir, transforms.copy(), True)
+            dataset = SteelDatasetTrainVal(
+                self.train_df, self.data_dir, transforms.copy(), True
+            )
         else:
             dataset = SteelDatasetTest(self.train_df, self.data_dir, transforms.copy())
+
+        if train and use_synthetic:
+            real_ds = SteelDatasetTrainVal(
+                self.train_df, self.data_dir, transforms.copy(), True
+            )
+            synth_ds = SyntheticDefectDataset(Path(synthetic_root), transforms.copy())
+            mixed_ds = MixedSeverstalDataset(real_ds, synth_ds, synthetic_ratio)
+            dataset = mixed_ds
+            self.mixed_ds = mixed_ds
 
         if train and balance is not None and alpha is not None:
             class_idxs = self.sort_classes(self.train_df)
             n_batches = self.train_df.shape[0] // batch_size
-            sampler = SamplerFactory(2).get(class_idxs, batch_size, n_batches, alpha, balance)
-            super().__init__(dataset, batch_sampler=sampler,
-                            num_workers=nworkers, pin_memory=pin_memory)
+            sampler = SamplerFactory(2).get(
+                class_idxs, batch_size, n_batches, alpha, balance
+            )
+            super().__init__(
+                dataset,
+                batch_sampler=sampler,
+                num_workers=nworkers,
+                pin_memory=pin_memory,
+            )
         else:
-            super().__init__(dataset, batch_size, shuffle=shuffle,
-                            num_workers=nworkers, pin_memory=pin_memory)
+            super().__init__(
+                dataset,
+                batch_size,
+                shuffle=shuffle,
+                num_workers=nworkers,
+                pin_memory=pin_memory,
+            )
 
     def load_df(self, train, validation_split):
         csv_filename = self.train_csv if train else self.test_csv
         df = pd.read_csv(self.data_dir / csv_filename)
-        if 'ImageId_ClassId' in df.columns:
-            df['ImageId'], df['ClassId'] = zip(*df['ImageId_ClassId'].str.split('_'))
-            df['ClassId'] = df['ClassId'].astype(int)
+        if "ImageId_ClassId" in df.columns:
+            df["ImageId"], df["ClassId"] = zip(*df["ImageId_ClassId"].str.split("_"))
+            df["ClassId"] = df["ClassId"].astype(int)
         else:
-            df['ClassId'] = df['ClassId'].astype(int)
-        df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
-        df.columns = [f'rle{c}' for c in range(4)]
-        df['defects'] = df.count(axis=1)
+            df["ClassId"] = df["ClassId"].astype(int)
+        df = df.pivot(index="ImageId", columns="ClassId", values="EncodedPixels")
+        df.columns = [f"rle{c}" for c in range(4)]
+        df["defects"] = df.count(axis=1)
 
         # add classification columns
         for c in range(4):
-            df[f'c{c}'] = df[f'rle{c}'].apply(lambda rle: not pd.isnull(rle))
+            df[f"c{c}"] = df[f"rle{c}"].apply(lambda rle: not pd.isnull(rle))
 
         if train and validation_split > 0:
-            return train_test_split(df, test_size=validation_split, stratify=df["defects"])
+            return train_test_split(
+                df, test_size=validation_split, stratify=df["defects"]
+            )
 
         return df, pd.DataFrame({})
 
     def sort_classes(self, df):
-        counts = {c: df[f'c{c}'].sum() for c in range(4)}
+        counts = {c: df[f"c{c}"].sum() for c in range(4)}
         sorted_classes = sorted(counts.items(), key=lambda kv: kv[1])
 
         def assign_min_sample_class(row, sorted_classes):
             for c, _ in sorted_classes:
-                if row[f'c{c}']:
+                if row[f"c{c}"]:
                     return c
             return -1
 
-        df['sample_class'] = df.apply(
-            lambda row: assign_min_sample_class(row, sorted_classes), axis=1)
-        class_idxs = [list(np.where(df['sample_class'] == c)[0]) for c in range(-1, 4)]
+        df["sample_class"] = df.apply(
+            lambda row: assign_min_sample_class(row, sorted_classes), axis=1
+        )
+        class_idxs = [list(np.where(df["sample_class"] == c)[0]) for c in range(-1, 4)]
         return class_idxs
 
     def split_validation(self):
@@ -84,57 +123,75 @@ class SteelSegDataLoader(DataLoader):
             return None
         else:
             dataset = SteelDatasetTrainVal(
-                self.val_df, self.data_dir, self.transforms.copy(), False)
-            return DataLoader(dataset, self.bs,
-                              num_workers=self.nworkers, pin_memory=self.pin_memory)
+                self.val_df, self.data_dir, self.transforms.copy(), False
+            )
+            return DataLoader(
+                dataset, self.bs, num_workers=self.nworkers, pin_memory=self.pin_memory
+            )
+
+    def get_mixed_dataset(self):
+        return getattr(self, "mixed_ds", None)
 
 
 class SteelSegPseudoDataLoader(DataLoader):
+    train_csv = "train.csv"
+    pseudo_csv = "pseudo.csv"
 
-    train_csv  = 'train.csv'
-    pseudo_csv = 'pseudo.csv'
-
-    def __init__(self, transforms, data_dir, batch_size, shuffle,
-                 validation_split, nworkers, pin_memory=True, alpha=0
+    def __init__(
+        self,
+        transforms,
+        data_dir,
+        batch_size,
+        shuffle,
+        validation_split,
+        nworkers,
+        pin_memory=True,
+        alpha=0,
     ):  # noqa
         self.transforms, self.shuffle = transforms, shuffle
         self.bs, self.nworkers, self.pin_memory = batch_size, nworkers, pin_memory
         self.data_dir = Path(data_dir)
 
         train_df, self.val_df = self.load_df(True, validation_split)
-        pseudo_df, _          = self.load_df(False, 0)
+        pseudo_df, _ = self.load_df(False, 0)
         self.train_df = pd.concat([train_df, pseudo_df])
 
-        dataset = SteelDatasetPseudo(self.train_df, self.data_dir, transforms.copy(), True)
+        dataset = SteelDatasetPseudo(
+            self.train_df, self.data_dir, transforms.copy(), True
+        )
 
-        n_train  = train_df.shape[0]
+        n_train = train_df.shape[0]
         n_pseudo = pseudo_df.shape[0]
         train_idxs = [idx for idx in range(n_train)]
         pseudo_idxs = [idx + n_train for idx in range(n_pseudo)]
         class_idxs = [train_idxs, pseudo_idxs]
 
         n_batches = (n_train + n_pseudo) // batch_size
-        sampler = SamplerFactory(2).get(class_idxs, batch_size, n_batches,
-                                        alpha=alpha, kind='fixed')
-        super().__init__(dataset, batch_sampler=sampler,
-                         num_workers=nworkers, pin_memory=pin_memory)
+        sampler = SamplerFactory(2).get(
+            class_idxs, batch_size, n_batches, alpha=alpha, kind="fixed"
+        )
+        super().__init__(
+            dataset, batch_sampler=sampler, num_workers=nworkers, pin_memory=pin_memory
+        )
 
     def load_df(self, train, validation_split):
         csv_filename = self.train_csv if train else self.pseudo_csv
         df = pd.read_csv(self.data_dir / csv_filename)
         if not train:  # the format of the csv has changed since the competition
-            df['ImageId'], df['ClassId'] = zip(*df['ImageId_ClassId'].str.split('_'))
-            df['ClassId'] = df['ClassId'].astype(int)
-        df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
-        df.columns = [f'rle{c}' for c in range(4)]
-        df['defects'] = df.count(axis=1)
+            df["ImageId"], df["ClassId"] = zip(*df["ImageId_ClassId"].str.split("_"))
+            df["ClassId"] = df["ClassId"].astype(int)
+        df = df.pivot(index="ImageId", columns="ClassId", values="EncodedPixels")
+        df.columns = [f"rle{c}" for c in range(4)]
+        df["defects"] = df.count(axis=1)
 
         # add classification columns
         for c in range(4):
-            df[f'c{c}'] = df[f'rle{c}'].apply(lambda rle: not pd.isnull(rle))
+            df[f"c{c}"] = df[f"rle{c}"].apply(lambda rle: not pd.isnull(rle))
 
         if train and validation_split > 0:
-            return train_test_split(df, test_size=validation_split, stratify=df["defects"])
+            return train_test_split(
+                df, test_size=validation_split, stratify=df["defects"]
+            )
 
         return df, pd.DataFrame({})
 
@@ -143,56 +200,71 @@ class SteelSegPseudoDataLoader(DataLoader):
             return None
         else:
             dataset = SteelDatasetPseudo(
-                self.val_df, self.data_dir, self.transforms.copy(), False)
-            return DataLoader(dataset, self.bs,
-                              num_workers=self.nworkers, pin_memory=self.pin_memory)
+                self.val_df, self.data_dir, self.transforms.copy(), False
+            )
+            return DataLoader(
+                dataset, self.bs, num_workers=self.nworkers, pin_memory=self.pin_memory
+            )
 
 
 class SteelClasPseudoDataLoader(DataLoader):
+    train_csv = "train.csv"
+    pseudo_csv = "pseudo.csv"
 
-    train_csv  = 'train.csv'
-    pseudo_csv = 'pseudo.csv'
-
-    def __init__(self, transforms, data_dir, batch_size, shuffle,
-                 validation_split, nworkers, pin_memory=True, alpha=0
+    def __init__(
+        self,
+        transforms,
+        data_dir,
+        batch_size,
+        shuffle,
+        validation_split,
+        nworkers,
+        pin_memory=True,
+        alpha=0,
     ):  # noqa
         self.transforms, self.shuffle = transforms, shuffle
         self.bs, self.nworkers, self.pin_memory = batch_size, nworkers, pin_memory
         self.data_dir = Path(data_dir)
 
         train_df, self.val_df = self.load_df(True, validation_split)
-        pseudo_df, _          = self.load_df(False, 0)
+        pseudo_df, _ = self.load_df(False, 0)
         self.train_df = pd.concat([train_df, pseudo_df])
 
-        dataset = SteelClasDatasetPseudo(self.train_df, self.data_dir, transforms.copy(), True)
+        dataset = SteelClasDatasetPseudo(
+            self.train_df, self.data_dir, transforms.copy(), True
+        )
 
-        n_train  = train_df.shape[0]
+        n_train = train_df.shape[0]
         n_pseudo = pseudo_df.shape[0]
         train_idxs = [idx for idx in range(n_train)]
         pseudo_idxs = [idx + n_train for idx in range(n_pseudo)]
         class_idxs = [train_idxs, pseudo_idxs]
 
         n_batches = (n_train + n_pseudo) // batch_size
-        sampler = SamplerFactory(2).get(class_idxs, batch_size, n_batches,
-                                        alpha=alpha, kind='fixed')
-        super().__init__(dataset, batch_sampler=sampler,
-                         num_workers=nworkers, pin_memory=pin_memory)
+        sampler = SamplerFactory(2).get(
+            class_idxs, batch_size, n_batches, alpha=alpha, kind="fixed"
+        )
+        super().__init__(
+            dataset, batch_sampler=sampler, num_workers=nworkers, pin_memory=pin_memory
+        )
 
     def load_df(self, train, validation_split):
         csv_filename = self.train_csv if train else self.pseudo_csv
         df = pd.read_csv(self.data_dir / csv_filename)
-        df['ImageId'], df['ClassId'] = zip(*df['ImageId_ClassId'].str.split('_'))
-        df['ClassId'] = df['ClassId'].astype(int)
-        df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
-        df.columns = [f'rle{c}' for c in range(4)]
-        df['defects'] = df.count(axis=1)
+        df["ImageId"], df["ClassId"] = zip(*df["ImageId_ClassId"].str.split("_"))
+        df["ClassId"] = df["ClassId"].astype(int)
+        df = df.pivot(index="ImageId", columns="ClassId", values="EncodedPixels")
+        df.columns = [f"rle{c}" for c in range(4)]
+        df["defects"] = df.count(axis=1)
 
         # add classification columns
         for c in range(4):
-            df[f'c{c}'] = df[f'rle{c}'].apply(lambda rle: not pd.isnull(rle))
+            df[f"c{c}"] = df[f"rle{c}"].apply(lambda rle: not pd.isnull(rle))
 
         if train and validation_split > 0:
-            return train_test_split(df, test_size=validation_split, stratify=df["defects"])
+            return train_test_split(
+                df, test_size=validation_split, stratify=df["defects"]
+            )
 
         return df, pd.DataFrame({})
 
@@ -201,14 +273,15 @@ class SteelClasPseudoDataLoader(DataLoader):
             return None
         else:
             dataset = SteelClasDatasetPseudo(
-                self.val_df, self.data_dir, self.transforms.copy(), False)
-            return DataLoader(dataset, self.bs,
-                              num_workers=self.nworkers, pin_memory=self.pin_memory)
+                self.val_df, self.data_dir, self.transforms.copy(), False
+            )
+            return DataLoader(
+                dataset, self.bs, num_workers=self.nworkers, pin_memory=self.pin_memory
+            )
 
 
 class SteelClasTestDataLoader(DataLoader):
-
-    test_csv  = 'sample_submission.csv'
+    test_csv = "sample_submission.csv"
 
     def __init__(self, transforms, data_dir, batch_size, nworkers, pin_memory=True):
         self.transforms = transforms
@@ -217,16 +290,22 @@ class SteelClasTestDataLoader(DataLoader):
 
         self.test_df = self.load_df(True)
 
-        dataset = SteelDatasetTest(self.test_df, self.data_dir, transforms.copy(), False)
-        super().__init__(dataset, batch_size=self.bs, num_workers=nworkers, pin_memory=pin_memory)
+        dataset = SteelDatasetTest(
+            self.test_df, self.data_dir, transforms.copy(), False
+        )
+        super().__init__(
+            dataset, batch_size=self.bs, num_workers=nworkers, pin_memory=pin_memory
+        )
 
     def load_df(self):
         df = pd.read_csv(self.data_dir / self.test_csv)
-        df['ImageId'], df['ClassId'] = zip(*df['ImageId_ClassId'].str.split('_'))
-        df['ClassId'] = df['ClassId'].astype(int)
-        df = df.pivot(index='ImageId', columns='ClassId', values='EncodedPixels')
-        df.columns = [f'rle{c}' for c in range(4)]
+        df["ImageId"], df["ClassId"] = zip(*df["ImageId_ClassId"].str.split("_"))
+        df["ClassId"] = df["ClassId"].astype(int)
+        df = df.pivot(index="ImageId", columns="ClassId", values="EncodedPixels")
+        df.columns = [f"rle{c}" for c in range(4)]
         return df
 
     def split_validation(self):
-        raise Exception('Attempt to split a validation data_loader from a test-only data_loader')
+        raise Exception(
+            "Attempt to split a validation data_loader from a test-only data_loader"
+        )

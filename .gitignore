@@ -107,6 +107,8 @@ input/
 saved/
 datasets/
 upload/
+gan_samples/
+synthetic/
 
 # editor, os cache directory
 .vscode/

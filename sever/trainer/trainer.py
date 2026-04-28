@@ -1,3 +1,5 @@
+import math
+
 import numpy as np
 import torch
 # from torchvision.utils import make_grid
@@ -12,8 +14,19 @@ class Trainer(BaseTrainer):
     Note:
         Inherited from BaseTrainer.
     """
-    def __init__(self, model, loss, metrics, optimizer, config, device,
-                 data_loader, valid_data_loader=None, lr_scheduler=None):
+
+    def __init__(
+        self,
+        model,
+        loss,
+        metrics,
+        optimizer,
+        config,
+        device,
+        data_loader,
+        valid_data_loader=None,
+        lr_scheduler=None,
+    ):
         super().__init__(model, loss, metrics, optimizer, config, device)
         self.config = config
         self.data_loader = data_loader
@@ -21,10 +34,20 @@ class Trainer(BaseTrainer):
         self.do_validation = self.valid_data_loader is not None
         self.lr_scheduler = lr_scheduler
         self.log_step = int(np.sqrt(data_loader.bs)) * 8
-        self.unfreeze_encoder = config['training']['unfreeze_encoder']
-        self.start_val_epoch = config['training']['start_val_epoch']
+        self.unfreeze_encoder = config["training"]["unfreeze_encoder"]
+        self.start_val_epoch = config["training"]["start_val_epoch"]
 
-        self.logger.info('Freezing encoder weights')
+        self.curriculum = config["training"].get("curriculum", False)
+        self.curriculum_step = config["training"].get("curriculum_step", 0.05)
+        self.max_synth_ratio = config["training"].get("max_synth_ratio", 0.5)
+        self.min_synth_ratio = config["training"].get("min_synth_ratio", 0.0)
+        self.synth_metric_idx = config["training"].get("synth_metric_idx", 2)
+        self.best_synth_metric = -math.inf
+        self.current_synth_ratio = config["data_loader"]["args"].get(
+            "synthetic_ratio", 0.0
+        )
+
+        self.logger.info("Freezing encoder weights")
         for p in self.model.encoder.parameters():
             p.requires_grad = False
 
@@ -45,7 +68,7 @@ class Trainer(BaseTrainer):
             The metrics in log must have the key 'metrics'.
         """
         if self.unfreeze_encoder is not None and epoch >= self.unfreeze_encoder:
-            self.logger.info('Unfreezing encoder weights')
+            self.logger.info("Unfreezing encoder weights")
             for p in self.model.encoder.parameters():
                 p.requires_grad = True
             self.unfreeze_encoder = None
@@ -54,14 +77,14 @@ class Trainer(BaseTrainer):
         self.writer.set_step((epoch) * len(self.data_loader))
         for i, param_group in enumerate(self.optimizer.param_groups):
             if i == 0:
-                self.writer.add_scalar('LR/encoder', param_group['lr'])
+                self.writer.add_scalar("LR/encoder", param_group["lr"])
             elif i == 1:
-                self.writer.add_scalar('LR/decoder', param_group['lr'])
+                self.writer.add_scalar("LR/decoder", param_group["lr"])
 
-        losses_comb = AverageMeter('loss_comb')
-        losses_bce  = AverageMeter('loss_bce')
-        losses_dice = AverageMeter('loss_dice')
-        losses_iou  = AverageMeter('loss_iou')
+        losses_comb = AverageMeter("loss_comb")
+        losses_bce = AverageMeter("loss_bce")
+        losses_dice = AverageMeter("loss_dice")
+        losses_iou = AverageMeter("loss_iou")
         metrics = [AverageMeter(m.__name__) for m in self.metrics]
 
         for batch_idx, (data, target) in enumerate(self.data_loader):
@@ -71,33 +94,38 @@ class Trainer(BaseTrainer):
             # self.logger.info(f'output: {output.size()}')
             # self.logger.info(f'target: {target.size()}')
             loss_dict = self.loss(output, target)
-            loss = loss_dict['loss']
-            bce = loss_dict.get('bce', torch.tensor([0]))
-            dice = loss_dict.get('dice', torch.tensor([0]))
-            iou = loss_dict.get('iou', torch.tensor([0]))
+            loss = loss_dict["loss"]
+            bce = loss_dict.get("bce", torch.tensor([0]))
+            dice = loss_dict.get("dice", torch.tensor([0]))
+            iou = loss_dict.get("iou", torch.tensor([0]))
 
             loss.backward()
             self.optimizer.step()
 
             losses_comb.update(loss.item(), data.size(0))
-            losses_bce.update(bce.item(),   data.size(0))
+            losses_bce.update(bce.item(), data.size(0))
             losses_dice.update(dice.item(), data.size(0))
             losses_iou.update(iou.item(), data.size(0))
 
             if batch_idx % self.log_step == 0:
                 self.writer.set_step((epoch) * len(self.data_loader) + batch_idx)
 
-                self.writer.add_scalar('batch/loss', loss.item())
-                self.writer.add_scalar('batch/bce',  bce.item())
-                self.writer.add_scalar('batch/dice', dice.item())
-                self.writer.add_scalar('batch/iou', iou.item())
+                self.writer.add_scalar("batch/loss", loss.item())
+                self.writer.add_scalar("batch/bce", bce.item())
+                self.writer.add_scalar("batch/dice", dice.item())
+                self.writer.add_scalar("batch/iou", iou.item())
 
                 for i, value in enumerate(self._eval_metrics(output, target)):
                     metrics[i].update(value, data.size(0))
-                    self.writer.add_scalar(f'batch/{metrics[i].name}', value)
+                    self.writer.add_scalar(f"batch/{metrics[i].name}", value)
 
-                self._log_batch(epoch, batch_idx, self.data_loader.bs,
-                                len(self.data_loader), loss.item())
+                self._log_batch(
+                    epoch,
+                    batch_idx,
+                    self.data_loader.bs,
+                    len(self.data_loader),
+                    loss.item(),
+                )
 
             # if batch_idx == 0:
             #     with torch.no_grad():
@@ -116,21 +144,45 @@ class Trainer(BaseTrainer):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        self.writer.add_scalar('epoch/loss', losses_comb.avg)
-        self.writer.add_scalar('epoch/bce',  losses_bce.avg)
-        self.writer.add_scalar('epoch/dice', losses_dice.avg)
-        self.writer.add_scalar('epoch/iou', losses_iou.avg)
+        self.writer.add_scalar("epoch/loss", losses_comb.avg)
+        self.writer.add_scalar("epoch/bce", losses_bce.avg)
+        self.writer.add_scalar("epoch/dice", losses_dice.avg)
+        self.writer.add_scalar("epoch/iou", losses_iou.avg)
         for m in metrics:
-            self.writer.add_scalar(f'epoch/{m.name}', m.avg)
+            self.writer.add_scalar(f"epoch/{m.name}", m.avg)
 
-        log = {
-            'loss': losses_comb.avg,
-            'metrics': [m.avg for m in metrics]
-        }
+        log = {"loss": losses_comb.avg, "metrics": [m.avg for m in metrics]}
 
         if self.do_validation and ((epoch % 10 == 0) or epoch >= self.start_val_epoch):
             val_log = self._valid_epoch(epoch)
             log = {**log, **val_log}
+
+            if self.curriculum:
+                current_metric = val_log["val_metrics"][self.synth_metric_idx]
+                if current_metric > self.best_synth_metric + 0.005:
+                    self.current_synth_ratio = min(
+                        self.current_synth_ratio + self.curriculum_step,
+                        self.max_synth_ratio,
+                    )
+                    self.best_synth_metric = current_metric
+                    self.logger.info(
+                        f"Curriculum: increased synth_ratio to {self.current_synth_ratio:.2f} "
+                        f"(metric improved to {current_metric:.3f})"
+                    )
+                elif current_metric < self.best_synth_metric - 0.005:
+                    self.current_synth_ratio = max(
+                        self.current_synth_ratio - self.curriculum_step,
+                        self.min_synth_ratio,
+                    )
+                    self.logger.info(
+                        f"Curriculum: decreased synth_ratio to {self.current_synth_ratio:.2f} "
+                        f"(metric degraded to {current_metric:.3f})"
+                    )
+
+                if hasattr(self.data_loader, "dataset") and hasattr(
+                    self.data_loader.dataset, "set_synth_ratio"
+                ):
+                    self.data_loader.dataset.set_synth_ratio(self.current_synth_ratio)
 
         if self.lr_scheduler is not None:
             self.lr_scheduler.step()
@@ -141,7 +193,7 @@ class Trainer(BaseTrainer):
         n_samples = batch_size * len_data
         n_complete = batch_idx * batch_size
         percent = 100.0 * batch_idx / len_data
-        msg = f'Train Epoch: {epoch} [{n_complete}/{n_samples} ({percent:.0f}%)] Loss: {loss:.6f}'
+        msg = f"Train Epoch: {epoch} [{n_complete}/{n_samples} ({percent:.0f}%)] Loss: {loss:.6f}"
         self.logger.debug(msg)
 
     def _valid_epoch(self, epoch):
@@ -154,10 +206,10 @@ class Trainer(BaseTrainer):
             The validation metrics in log must have the key 'val_metrics'.
         """
         self.model.eval()
-        losses_comb = AverageMeter('loss_comb')
-        losses_bce  = AverageMeter('loss_bce')
-        losses_dice = AverageMeter('loss_dice')
-        losses_iou = AverageMeter('loss_iou')
+        losses_comb = AverageMeter("loss_comb")
+        losses_bce = AverageMeter("loss_bce")
+        losses_dice = AverageMeter("loss_dice")
+        losses_iou = AverageMeter("loss_iou")
         metrics = [AverageMeter(m.__name__) for m in self.metrics]
         with torch.no_grad():
             for batch_idx, (data, target) in enumerate(self.valid_data_loader):
@@ -165,13 +217,13 @@ class Trainer(BaseTrainer):
 
                 output = self.model(data)
                 loss_dict = self.loss(output, target)
-                loss = loss_dict['loss']
-                bce = loss_dict.get('bce', torch.tensor([0]))
-                dice = loss_dict.get('dice', torch.tensor([0]))
-                iou = loss_dict.get('iou', torch.tensor([0]))
+                loss = loss_dict["loss"]
+                bce = loss_dict.get("bce", torch.tensor([0]))
+                dice = loss_dict.get("dice", torch.tensor([0]))
+                iou = loss_dict.get("iou", torch.tensor([0]))
 
                 losses_comb.update(loss.item(), data.size(0))
-                losses_bce.update(bce.item(),   data.size(0))
+                losses_bce.update(bce.item(), data.size(0))
                 losses_dice.update(dice.item(), data.size(0))
                 losses_iou.update(iou.item(), data.size(0))
 
@@ -184,18 +236,15 @@ class Trainer(BaseTrainer):
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-        self.writer.set_step((epoch), 'valid')
-        self.writer.add_scalar('loss', losses_comb.avg)
-        self.writer.add_scalar('bce', losses_bce.avg)
-        self.writer.add_scalar('dice', losses_dice.avg)
-        self.writer.add_scalar('iou', losses_iou.avg)
+        self.writer.set_step((epoch), "valid")
+        self.writer.add_scalar("loss", losses_comb.avg)
+        self.writer.add_scalar("bce", losses_bce.avg)
+        self.writer.add_scalar("dice", losses_dice.avg)
+        self.writer.add_scalar("iou", losses_iou.avg)
         for m in metrics:
             self.writer.add_scalar(m.name, m.avg)
 
-        return {
-            'val_loss': losses_comb.avg,
-            'val_metrics': [m.avg for m in metrics]
-        }
+        return {"val_loss": losses_comb.avg, "val_metrics": [m.avg for m in metrics]}
 
     def _eval_metrics(self, output, target):
         with torch.no_grad():
@@ -206,6 +255,7 @@ class Trainer(BaseTrainer):
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""
+
     def __init__(self, name):
         self.name = name
         self.reset()

@@ -1,0 +1,42 @@
+# Conditional WGAN-GP hyperparameters for steel defect generation
+
+# --- Model architecture ---
+z_dim: 100 # Latent noise dimension
+cond_dim: 7 # Condition vector: 4 classes + 3 size buckets
+ngf: 64 # Generator base number of features
+ndf: 64 # Critic base number of features
+
+# --- Optimizer ---
+lr_g: 0.0002 # Generator learning rate
+lr_d: 0.0002 # Critic learning rate
+beta1: 0.5 # Adam beta1
+beta2: 0.999 # Adam beta2
+
+# --- Training ---
+batch_size: 16 # Batch size for training
+# NOTE: Reduce to 8 if using Apple MPS to avoid memory issues
+n_epochs: 200 # Total training epochs
+n_critic: 5 # Critic updates per generator update
+lambda_gp: 10.0 # Gradient penalty coefficient
+
+# --- Logging & checkpoints ---
+sample_interval: 10 # Save sample images every N epochs
+checkpoint_interval: 20 # Save model checkpoint every N epochs
+
+# --- Dataset ---
+csv_path: data/train.csv
+image_root: data/train_images
+patch_size: [256, 256]
+min_defect_area: 50
+num_workers: 4
+
+# --- Output ---
+save_dir: saved/gan
+
+# --- Reconstruction guidance ---
+use_reconstruction_loss: true
+recon_weight: 10.0
+
+# --- System ---
+device: auto # auto | cuda | mps | cpu
+seed: 42

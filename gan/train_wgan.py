@@ -24,6 +24,39 @@ from gan.models import ConditionalGenerator, PatchGANCritic
 from gan.utils import gradient_penalty, save_image_grid, set_seed
 
 
+def find_latest_checkpoint(checkpoint_dir):
+    """Find the most recent GAN checkpoint in the directory."""
+    checkpoint_dir = Path(checkpoint_dir)
+    if not checkpoint_dir.exists():
+        return None
+    checkpoints = sorted(checkpoint_dir.glob("checkpoint_epoch_*.pth"))
+    if not checkpoints:
+        return None
+    return str(checkpoints[-1])
+
+
+def resume_from_checkpoint(checkpoint_path, G, D, optimizer_G, optimizer_D, device):
+    """Load model and optimizer states from a checkpoint."""
+    checkpoint_path = Path(checkpoint_path)
+    if not checkpoint_path.exists():
+        print(
+            f"Warning: checkpoint {checkpoint_path} not found. Starting from scratch."
+        )
+        return 0
+
+    print(f"Resuming from checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+
+    G.load_state_dict(checkpoint["generator_state_dict"])
+    D.load_state_dict(checkpoint["critic_state_dict"])
+    optimizer_G.load_state_dict(checkpoint["optimizer_G_state_dict"])
+    optimizer_D.load_state_dict(checkpoint["optimizer_D_state_dict"])
+
+    start_epoch = checkpoint.get("epoch", 0)
+    print(f"Resumed training from epoch {start_epoch}")
+    return start_epoch
+
+
 def train_gan(config):
     """Main WGAN-GP training loop."""
     # --- Setup ---
@@ -110,11 +143,22 @@ def train_gan(config):
         fixed_cond[i, cls] = 1.0
         fixed_cond[i, 4 + size] = 1.0
 
+    # --- Resume ---
+    start_epoch = 0
+    if config.get("resume"):
+        resume_path = config["resume"]
+        if resume_path.lower() == "latest":
+            resume_path = find_latest_checkpoint(checkpoint_dir)
+        if resume_path:
+            start_epoch = resume_from_checkpoint(
+                resume_path, G, D, optimizer_G, optimizer_D, device
+            )
+
     # --- Training Loop ---
     g_losses = []
     d_losses = []
 
-    for epoch in range(n_epochs):
+    for epoch in range(start_epoch, n_epochs):
         for batch_idx, batch in enumerate(dataloader):
             # batch: (patch, mask, condition)
             if len(batch) == 3:
@@ -234,10 +278,19 @@ def main():
     parser.add_argument(
         "--config", type=str, default="gan/config.yml", help="Path to config YAML"
     )
+    parser.add_argument(
+        "--resume",
+        type=str,
+        default=None,
+        help="Path to checkpoint to resume from. Use 'latest' to auto-pick the most recent.",
+    )
     args = parser.parse_args()
 
     with open(args.config, "r") as f:
         config = yaml.safe_load(f)
+
+    if args.resume:
+        config["resume"] = args.resume
 
     train_gan(config)
 

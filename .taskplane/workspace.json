@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {
+      "name": "severstal-steel-defect-detection",
+      "path": "../severstal-steel-defect-detection",
+      "default_branch": "main"
+    }
+  ],
+  "routing": {
+    "tasks_root": "taskplane-tasks",
+    "default_repo": "severstal-steel-defect-detection",
+    "strict": false
+  }
+}

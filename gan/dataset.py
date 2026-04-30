@@ -51,15 +51,24 @@ class DefectPatchDataset(Dataset):
                 "_", expand=True
             )
             df["ClassId"] = df["ClassId"].astype(int)
-            df = df.pivot(index="ImageId", columns="ClassId", values="EncodedPixels")
+            # Ensure ImageId is string and set as index before pivot
+            df["ImageId"] = df["ImageId"].astype(str)
+            # Drop duplicate ImageId column (if exists from original CSV)
+            if "ImageId" in df.columns[:-2].tolist():
+                df = df.loc[:, ~df.columns.duplicated(keep="first")]
+            # Set ImageId as index explicitly for pivot
+            df = df.set_index("ImageId")
+            df = df.pivot(columns="ClassId", values="EncodedPixels")
             df.columns = [f"rle{int(c)}" for c in df.columns]
         else:
             # Already wide or alternate format
             df = df.copy()
+            # Ensure index is string
+            df.index = df.index.astype(str)
 
         samples = []
         for img_name in df.index:
-            img_path = self.image_root / img_name
+            img_path = self.image_root / str(img_name)
             if not img_path.exists():
                 continue
 
@@ -79,7 +88,7 @@ class DefectPatchDataset(Dataset):
                 size_bucket = self._size_bucket(area)
                 samples.append(
                     {
-                        "image_id": img_name,
+                        "image_id": str(img_name),
                         "class_id": c,  # 0-indexed: 0,1,2,3
                         "rle": rle,
                         "area": int(area),

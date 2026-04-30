@@ -16,6 +16,12 @@ class DefectPatchDataset(Dataset):
     """
     Dataset that extracts patches around defect regions from Severstal steel images.
 
+    Supports two CSV formats:
+      Format A: ImageId_ClassId, EncodedPixels [, ImageId]
+                (e.g. rows like "00bbcd9af.jpg_3", "155553 65 ...")
+      Format B: ImageId, ClassId, EncodedPixels
+                (long format with separate columns)
+
     Args:
         csv_path: Path to train.csv
         image_root: Path to train_images folder
@@ -39,31 +45,47 @@ class DefectPatchDataset(Dataset):
         self.return_mask = return_mask
 
         self.samples = self._build_samples()
-        self.mean_val = 0.3439  # dataset mean for padding
+        self.mean_val = 0.3439
 
     def _build_samples(self):
         """Parse CSV and build list of defect patches."""
         df = pd.read_csv(self.csv_path)
 
-        # The CSV has 3 columns: ImageId_ClassId, EncodedPixels, ImageId
-        # ImageId_ClassId = "filename_classid" (e.g. "00bbcd9af.jpg_3")
-        # ImageId = "filename" (duplicate of the filename part)
-        # EncodedPixels = RLE mask
-        #
-        # Strategy: use existing ImageId column as index, extract ClassId from ImageId_ClassId
-        if "ImageId_ClassId" in df.columns and "ImageId" in df.columns:
-            # Extract class_id (1-4) from ImageId_ClassId column
-            class_ids = df["ImageId_ClassId"].str.split("_").str[-1].astype(int)
-            df["ClassId"] = class_ids
-            # Use existing ImageId column (string) as index
+        # ── Format A: ImageId_ClassId column present ──────────────────
+        if "ImageId_ClassId" in df.columns:
+            if "ImageId" in df.columns:
+                # Format A1: ImageId_ClassId, EncodedPixels, ImageId
+                # Use existing ImageId column as index (filename string)
+                class_ids = df["ImageId_ClassId"].str.split("_").str[-1].astype(int)
+                df["ClassId"] = class_ids
+                df["ImageId"] = df["ImageId"].astype(str)
+                df = df.set_index("ImageId")
+                df = df.pivot(columns="ClassId", values="EncodedPixels")
+                df.columns = [f"rle{int(c)}" for c in df.columns]
+            else:
+                # Format A2: ImageId_ClassId, EncodedPixels (no ImageId column)
+                # Extract both filename and class from ImageId_ClassId
+                parts = df["ImageId_ClassId"].str.rsplit("_", n=1, expand=True)
+                df["ImageId"] = parts[0].astype(str)
+                df["ClassId"] = parts[1].astype(int)
+                df = df.set_index("ImageId")
+                df = df.pivot(columns="ClassId", values="EncodedPixels")
+                df.columns = [f"rle{int(c)}" for c in df.columns]
+
+        # ── Format B: ClassId column present (long format) ─────────────
+        elif "ClassId" in df.columns:
             df["ImageId"] = df["ImageId"].astype(str)
+            df["ClassId"] = df["ClassId"].astype(int)
             df = df.set_index("ImageId")
             df = df.pivot(columns="ClassId", values="EncodedPixels")
             df.columns = [f"rle{int(c)}" for c in df.columns]
+
+        # ── Fallback ───────────────────────────────────────────────────
         else:
             df = df.copy()
             df.index = df.index.astype(str)
 
+        # ── Build sample list ───────────────────────────────────────────
         samples = []
         for img_name in df.index:
             img_path = self.image_root / str(img_name)

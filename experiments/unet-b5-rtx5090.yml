@@ -47,12 +47,12 @@ optimizer:
   args:
     lr: 0.001
     weight_decay: 0.0002
-decoder:
-  lr: 0.003
-  weight_decay: 0.0003
-encoder:
-  lr: 7.0e-05
-  weight_decay: 3.0e-05
+  encoder:
+    lr: 7.0e-05
+    weight_decay: 3.0e-05
+  decoder:
+    lr: 0.003
+    weight_decay: 0.0003
 testing:
   batch_size: 128
   data_dir: /workspace/data

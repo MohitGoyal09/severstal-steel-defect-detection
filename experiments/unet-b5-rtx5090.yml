@@ -23,7 +23,6 @@ data_loader:
     batch_size: 64
     data_dir: /workspace/data
     nworkers: 4
-    prefetch_factor: 2
     shuffle: true
     validation_split: 0.2
 loss:

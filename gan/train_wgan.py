@@ -169,6 +169,8 @@ def train_gan(config):
 
             real_patches = real_patches.to(device)
             conditions = conditions.to(device)
+            if real_masks is not None:
+                real_masks = real_masks.to(device)
             batch_size_current = real_patches.size(0)
 
             # ---------------------

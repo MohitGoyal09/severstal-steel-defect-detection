@@ -1,0 +1,561 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+% -------------------------------------------------------
+% Packages
+% -------------------------------------------------------
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{multirow}
+\usepackage{tabularx}
+\usepackage[T1]{fontenc}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+% -------------------------------------------------------
+% Title & Authors
+% -------------------------------------------------------
+\begin{document}
+
+
+\title{SynthInspect: A Conditional Generative Augmentation Pipeline\\
+for Rare Steel Surface Defect Detection\\}
+
+
+\author{
+\IEEEauthorblockN{Mohit Goyal}
+\IEEEauthorblockA{
+\textit{Department of Computer Science and Engineering} \\
+\textit{Bharati Vidyapeeth's College of Engineering} \\
+New Delhi, India \\
+mohitgoyal09042006@gmail.com}
+\and
+\IEEEauthorblockN{Angel Gupta}
+\IEEEauthorblockA{
+\textit{Department of Computer Science and Engineering} \\
+\textit{Bharati Vidyapeeth's College of Engineering} \\
+New Delhi, India \\
+angelgupt16@gmail.com}
+}
+
+
+
+\maketitle
+
+% -------------------------------------------------------
+% ABSTRACT
+% -------------------------------------------------------
+\begin{abstract}
+Industrial steel surface inspection is critically constrained by scarce
+and imbalanced annotated defect samples. In the Severstal Steel Defect
+Detection benchmark, 63\% of images are defect-free while the rarest
+defect class contains only approximately 320 annotated instances,
+making robust supervised training difficult and annotation expansion
+prohibitively expensive. This project proposes \textit{SynthInspect},
+a conditional generative augmentation pipeline that learns defect
+distributions directly from Severstal line-scan images to
+systematically improve rare-defect detection.
+
+We design a DG-GAN architecture with a U-Net-inspired generator
+incorporating Atrous Spatial Pyramid Pooling (ASPP) and defect-aware
+attention mechanisms for 1600$\times$256 wide-aspect images, coupled
+with a multi-scale PatchGAN discriminator trained via WGAN-GP. The
+generator is conditioned on defect class, spatial location, size, and
+severity, enabling controllable synthesis of diverse defects on
+realistic steel backgrounds. Generated samples undergo
+discriminator-score quality filtering and are integrated into a
+curriculum-based training loop with dynamically scheduled real:synthetic
+mixing ratios. We hypothesize a 15--25\% relative improvement in
+rare-class average precision versus traditional augmentation alone,
+alongside a 50--90\% reduction in real annotation requirements.
+Validation comprises ablation studies on Severstal and cross-dataset
+transfer to NEU Surface Defect, with a fully open-source PyTorch
+implementation targeting IECON 2026 submission.
+\end{abstract}
+
+\begin{IEEEkeywords}
+Generative Adversarial Networks, Steel Defect Detection, Data Augmentation,
+Curriculum Learning, WGAN-GP, Severstal, Image Synthesis
+\end{IEEEkeywords}
+
+% -------------------------------------------------------
+% SECTION I: INTRODUCTION
+% -------------------------------------------------------
+\section{Introduction}
+
+Automated visual inspection of steel surfaces is a critical quality
+control step in modern manufacturing. However, supervised deep learning
+approaches for defect detection are limited by severe data imbalance:
+the majority of production images show defect-free surfaces, while
+rare but high-impact defect types have only a handful of annotated
+examples. In the widely-used Severstal Steel Defect Detection
+benchmark \cite{severstal_kaggle}, Class~2 (pitted surface) contains
+approximately 320 instances against over 7,000 defect-free images,
+a class imbalance ratio of roughly 45:1.
+
+Traditional countermeasures---geometric and photometric
+augmentations---operate on a fixed set of defect templates and cannot
+synthesize genuinely new defect morphologies or placements
+\cite{severstal_aug_study}. This motivates our use of conditional
+Generative Adversarial Networks (GANs) to \emph{learn} the defect
+distribution from real Severstal imagery and generate novel,
+mask-paired defect examples on demand.
+
+% -------------------------------------------------------
+% SECTION II: LITERATURE REVIEW
+% -------------------------------------------------------
+\section{Literature Review}
+
+\subsection{Traditional Augmentation and Procedural Synthesis}
+
+Early work on steel defect recognition relied on geometric and
+photometric augmentations (rotation, flipping, brightness jittering)
+and procedural simulation. Boikov et al.\ \cite{boikov2021synthetic}
+generated fully synthetic steel surface images via procedural rendering
+and trained CNNs for detection and classification on Severstal-like
+conditions. Despite strong reported performance, these synthetic textures
+are not learned from actual Severstal imagery and lack fine-grained mask
+conditioning over defect location and severity. Consequently, such methods
+cannot address the long-tail imbalance problem for specific rare-class
+instance generation. A systematic study of augmentation strategies on
+Severstal U-Net baselines \cite{severstal_aug_study} confirms that
+naive augmentation alone yields limited gains on this dataset.
+
+\subsection{GAN-Based Defect Synthesis}
+
+GAN-based approaches have demonstrated significant potential for
+industrial defect augmentation. Fusible-feature GANs for steel strip
+defects under few-shot constraints \cite{fusible_gan} fuse background
+and defect features to expand limited datasets and improve recognition
+in highly imbalanced settings. DG-GAN variants \cite{dg_gan_surface}
+employ U-shaped generators with spatially adaptive normalization and
+custom perceptual losses for high-quality synthesis, reporting improved
+FID and downstream classification improvements. A sketch-guided,
+SPADE-like architecture \cite{sketch_spade_steel} enables controllable
+generation via edge and texture conditioning for steel strip surfaces.
+However, these methods typically: (a) evaluate generation quality in
+isolation; (b) use fixed synthetic-to-real ratios without adaptive
+scheduling; and (c) omit systematic per-class AP evaluation on canonical
+benchmarks such as Severstal.
+
+\subsection{Diffusion Models for Defect Data}
+
+Recent work fine-tunes latent diffusion models on steel datasets for
+segmentation enhancement \cite{diffusion_steel_seg}. While achieving
+high fidelity, diffusion-based approaches require substantially more
+compute and more complex conditional control mechanisms, making them
+less practical for rapid deployment in resource-constrained industrial
+settings within short research timelines.
+
+\subsection{Research Gap}
+
+Existing approaches exhibit three principal limitations:
+\begin{enumerate}
+    \item Absence of fine-grained class, location, size, and severity
+          conditioning directly trained on Severstal line-scan images.
+    \item No closed-loop curriculum that dynamically adjusts the
+          real:synthetic ratio based on downstream validation
+          performance.
+    \item Insufficient systematic evaluation of rare-class detection
+          gains and annotation reduction on a widely-benchmarked
+          industrial dataset.
+\end{enumerate}
+Our work addresses all three gaps through a Severstal-specific,
+mask-conditioned DG-GAN with discriminator-score quality filtering and
+a validation-driven curriculum scheduler---detailed in
+Section~\ref{sec:methodology}.
+
+% -------------------------------------------------------
+% SECTION III: PROPOSED METHODOLOGY
+% -------------------------------------------------------
+\section{Proposed Methodology}
+\label{sec:methodology}
+
+Fig.~\ref{fig:pipeline} provides a full overview of the
+\textit{SynthInspect} pipeline. The system has three integrated
+stages: (1) conditional defect generation, (2) quality-filtered
+curriculum integration, and (3) downstream detection with systematic
+evaluation.
+
+\begin{figure*}[t]
+    \centering
+    \includegraphics[width=\textwidth]{pipeline_image.png}
+    \caption{Overview of the SynthInspect closed-loop generative
+    augmentation pipeline. Severstal raw images and RLE masks are
+    preprocessed and split into two branches: DG-GAN training and
+    baseline detector training. The conditional generator and
+    multi-scale PatchGAN discriminator learn to synthesize realistic,
+    mask-conditioned defect patches. Synthetic samples are filtered by
+    discriminator score, combined with real data, and fed to a
+    curriculum scheduler that dynamically adjusts the real:synthetic
+    ratio using validation mAP. The final detector is evaluated on a
+    held-out real test set.}
+    \label{fig:pipeline}
+\end{figure*}
+
+\subsection{Stage I: Preprocessing and Data Preparation}
+
+Raw Severstal images (1600$\times$256 px) and run-length encoded (RLE)
+masks from \texttt{train.csv} are decoded into binary segmentation
+masks. The dataset is split in a stratified manner (80\% train,
+10\% validation, 10\% test) to preserve rare-class representation.
+Images are resized or cropped to 512$\times$512 inputs with
+aspect-preserving padding, followed by ImageNet-mean normalization.
+Standard geometric augmentations (horizontal/vertical flip,
+random rotation $\pm$15$^\circ$, brightness/contrast jitter) are
+applied during baseline training only.
+
+\subsection{Stage II: Conditional DG-GAN}
+
+\subsubsection{Generator Architecture}
+The generator $G$ is a U-Net-style encoder-decoder with five
+downsampling blocks using residual connections, producing feature maps
+at multiple spatial resolutions. Atrous Spatial Pyramid Pooling (ASPP)
+with dilation rates $\{6, 12, 18\}$ is inserted at the bottleneck
+to capture both fine-grained textures and large-scale defect structures.
+Defect-aware attention (spatial + channel + class-conditional) is
+applied in decoder layers to localize synthesis to the specified region.
+
+The conditioning vector $\mathbf{c} = [c, \mathbf{b}, s, v]$ encodes:
+\begin{itemize}
+    \item $c \in \{1,2,3,4\}$: defect class (one-hot),
+    \item $\mathbf{b} = (x,y,w,h)$: bounding box location,
+    \item $s \in [0,1]$: normalized defect area,
+    \item $v \in [0,1]$: severity estimate.
+\end{itemize}
+$\mathbf{c}$ is injected via class-conditional batch normalization and
+concatenated with spatial feature maps after projection.
+
+\subsubsection{Discriminator Architecture}
+The discriminator $D$ is a multi-scale PatchGAN operating at three
+resolutions (full, half, quarter) using shared parameters via strided
+average pooling. Each scale outputs a patch-level realism map, and all
+maps are averaged for the final score.
+
+\subsubsection{Training Objective}
+The training loss combines:
+\begin{align}
+    \mathcal{L}_{\text{WGAN-GP}} &= \mathbb{E}[D(\tilde{x})] -
+    \mathbb{E}[D(x)] + \lambda_{\text{GP}}\,\hat{\mathcal{L}}_{\text{GP}},
+    \label{eq:wgan} \\
+    \mathcal{L}_G &= -\mathbb{E}[D(\tilde{x})] + \lambda_1\mathcal{L}_1
+    + \lambda_p\mathcal{L}_{\text{perc}},
+    \label{eq:gen_loss}
+\end{align}
+where $\lambda_{\text{GP}}=10$, $\lambda_1=10$, and
+$\lambda_p=0.1$. $\mathcal{L}_1$ is an L1 reconstruction loss against
+the real defect-region content, and $\mathcal{L}_{\text{perc}}$ is a
+VGG-19 perceptual loss on feature activations from layers
+\texttt{relu2\_2} and \texttt{relu4\_4}.
+
+\subsection{Stage III: Quality Filtering and Curriculum Integration}
+
+\subsubsection{Discriminator-Score Quality Filter}
+After training, $G$ is used to generate a pool of $N_{\text{pool}}$
+synthetic images. The discriminator assigns each generated sample a
+realism score $\sigma_i = D(G(z_i, \mathbf{c}_i))$. Samples are
+retained if:
+\begin{equation}
+    \sigma_i \in [q_{30}, q_{70}],
+    \label{eq:filter}
+\end{equation}
+where $q_{30}$ and $q_{70}$ are the 30th and 70th percentiles of
+$\{\sigma_i\}$. This retains samples that are realistic yet
+challenging, discarding obvious failures (low $\sigma$) and trivially
+easy samples (very high $\sigma$, near-memorization).
+
+\subsubsection{Curriculum Scheduler}
+The training dataset at epoch $t$ is constructed as:
+\begin{equation}
+    \mathcal{D}_t = (1-\rho_t)\,\mathcal{D}_{\text{real}} +
+    \rho_t\,\mathcal{D}_{\text{syn}},
+    \label{eq:mix}
+\end{equation}
+with the mixing ratio $\rho_t$ initialized to 0.10 and updated every
+$\Delta$ epochs according to:
+\begin{equation}
+    \rho_{t+\Delta} =
+    \begin{cases}
+        \min(\rho_t + 0.05,\ 0.50) & \text{if } \Delta\text{mAP}_{\text{val}} > 0 \\
+        \max(\rho_t - 0.05,\ 0.10) & \text{if } \Delta\text{mAP}_{\text{val}} < -\epsilon \\
+        \rho_t & \text{otherwise,}
+    \end{cases}
+    \label{eq:curriculum}
+\end{equation}
+where $\epsilon = 0.005$ is a tolerance threshold for mAP degradation.
+
+\subsection{Stage IV: Downstream Detection}
+
+Two detector architectures are evaluated:
+\begin{itemize}
+    \item \textbf{U-Net with ResNet-34 encoder}: segmentation model
+          from \texttt{segmentation\_models.pytorch} \cite{khornlund_repo},
+          trained with BCE + Dice loss.
+    \item \textbf{YOLOv8-m}: bounding-box detection for architecture
+          agnosticism evaluation.
+\end{itemize}
+Both receive the curriculum-mixed dataset $\mathcal{D}_t$ and are
+evaluated on a held-out real test set (no synthetic images) to avoid
+distribution leakage.
+
+% -------------------------------------------------------
+% SECTION IV: DATASET AND EXPERIMENT PLAN
+% -------------------------------------------------------
+\section{Dataset and Experiment Plan}
+
+\subsection{Datasets}
+
+\subsubsection{Primary: Severstal Steel Defect Detection}
+Table~\ref{tab:dataset} summarizes the dataset characteristics.
+
+\begin{table}[h]
+\centering
+\caption{Severstal Steel Defect Detection Dataset Summary}
+\label{tab:dataset}
+\begin{tabular}{ll}
+\toprule
+\textbf{Attribute} & \textbf{Specification} \\
+\midrule
+Source          & Kaggle Competition, 2019 \cite{severstal_kaggle} \\
+Total images    & 18,074 (12,568 train / 5,506 test) \\
+Resolution      & 1600$\times$256 px (line-scan) \\
+Annotation      & Pixel-level RLE masks \\
+Classes         & 4 defect types + background \\
+Defect-free     & $\approx$63\% of all images \\
+Rarest class    & Class 2: $\approx$320 instances (45:1 ratio) \\
+Split           & 80 / 10 / 10 (stratified by class) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Implementation references:}
+We build upon established PyTorch repositories: khornlund
+\cite{khornlund_repo} for the SMP-based U-Net baseline, and Diyago
+\cite{diyago_repo} for Albumentations-based augmentation pipelines
+and attention blocks (Top-2\% competition solution). EDA and RLE
+decoding follow Aleksandra's Kaggle notebook \cite{aleksandra_eda}.
+
+\subsubsection{Secondary: NEU Surface Defect}
+1,800 grayscale 200$\times$200 images across six defect categories
+(Northeastern University, China). Used exclusively for cross-dataset
+transfer evaluation to assess generalization.
+
+\subsection{Planned Experiments}
+
+Table~\ref{tab:experiments} lists the five core ablation experiments.
+
+\begin{table}[h]
+\centering
+\caption{Planned Experiments and Hypotheses}
+\label{tab:experiments}
+\renewcommand{\arraystretch}{1.25}
+\begin{tabularx}{\columnwidth}{>{\bfseries}l X X}
+\toprule
+\textbf{Experiment} & \textbf{Variants} & \textbf{Hypothesis} \\
+\midrule
+E1: Baseline
+& Real-only; Real + traditional aug
+& Traditional aug $<$5\% mAP gain \\
+\addlinespace
+E2: Ratio ablation
+& $\rho \in \{0, 0.10, 0.25, 0.50, 0.75\}$
+& Optimal $\rho \approx 0.30$--$0.50$ \\
+\addlinespace
+E3: Curriculum vs.\ fixed
+& Scheduled $\rho$ (10\%$\to$50\%) vs.\ best fixed $\rho$
+& Curriculum outperforms by $>$5\% mAP \\
+\addlinespace
+E4: Filtering ablation
+& With vs.\ without D-score filter
+& Filtering improves sample efficiency \\
+\addlinespace
+E5: Annotation reduction
+& Remove 50\%, 75\%, 90\% rare-class labels
+& $<$3\% mAP drop with 50\% removal \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Evaluation Metrics}
+
+Table~\ref{tab:metrics} defines all metrics used for evaluation.
+
+\begin{table}[h]
+\centering
+\caption{Evaluation Metrics and Targets}
+\label{tab:metrics}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\columnwidth}{l X l}
+\toprule
+\textbf{Category} & \textbf{Metric} & \textbf{Target} \\
+\midrule
+Generation quality  & FID (lower is better)         & $<50$ \\
+Perceptual quality  & LPIPS (lower is better)       & $<0.30$ \\
+Detection           & mAP@0.50                      & $>0.75$ \\
+Detection           & mAP@0.50:0.95                 & $>0.50$ \\
+Rare-class focus    & Per-class AP (Class~2)        & $>0.60$ \\
+Segmentation        & Mean IoU / Dice               & $>0.70$ / $>0.80$ \\
+Annotation saving   & Effective label reduction     & 50--90\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Implementation Timeline}
+
+Table~\ref{tab:timeline} shows the week-by-week implementation plan
+aligned with the 10-week project schedule.
+
+\begin{table}[h]
+\centering
+\caption{Implementation Roadmap (10-Week Schedule)}
+\label{tab:timeline}
+\renewcommand{\arraystretch}{1.2}
+\begin{tabularx}{\columnwidth}{c X l}
+\toprule
+\textbf{Week} & \textbf{Task} & \textbf{Deliverable} \\
+\midrule
+1   & EDA, RLE decoding, data loading,
+      clone khornlund baseline \cite{khornlund_repo}
+    & Working data loader; class distribution plots \\
+2   & Albumentations pipeline \cite{diyago_repo};
+      attention blocks; strong baseline
+    & Baseline mAP on real data only \\
+3   & DG-GAN generator (U-Net + ASPP)
+    & 512$\times$512 defect generation \\
+4   & Multi-scale PatchGAN + WGAN-GP;
+      stable GAN checkpoint
+    & FID $<$ 150 on defect patches \\
+5   & Quality filtering; 10K synthetic dataset
+    & FID $<$ 100; RLE masks saved \\
+6   & Curriculum integration;
+      mixed training experiments
+    & mAP vs.\ baseline; E1, E2 results \\
+7   & Curriculum vs.\ fixed (E3);
+      filtering ablation (E4)
+    & Full ablation tables \\
+8   & Annotation reduction (E5);
+      cross-dataset on NEU
+    & Transfer and annotation results \\
+9   & Paper drafting; figures; code cleanup
+    & Draft IEEE paper \\
+10  & Revision; open-source release; submission
+    & IECON 2026 submission \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% -------------------------------------------------------
+% Risk Mitigation
+% -------------------------------------------------------
+\section{Risk Mitigation}
+
+To address potential technical risks, we implement the following
+contingency strategies:
+
+\begin{itemize}
+    \item \textbf{GAN training instability:} Checkpoint every epoch
+          with FID evaluation. If conditional DG-GAN fails to converge
+          by Week~4, fallback to (a) unconditional GAN on defect patches
+          with post-hoc classification, or (b) fine-tuned Stable
+          Diffusion with LoRA.
+    \item \textbf{Compute constraints:} Pre-allocated cloud GPU
+          instances (AWS/GCP) with mixed-precision training and
+          gradient checkpointing.
+    \item \textbf{Dataset access:} Confirmed Kaggle availability;
+          NEU dataset as verified backup.
+\end{itemize}
+
+% -------------------------------------------------------
+% SECTION V: CONCLUSION
+% -------------------------------------------------------
+\section{Conclusion}
+
+This milestone report presents \textit{SynthInspect}, a conditional
+generative augmentation framework for steel surface defect detection.
+The proposed system addresses critical limitations of prior work by
+integrating a Severstal-specific mask-conditioned DG-GAN with
+discriminator-score quality filtering and a validation-driven
+curriculum scheduler. The methodology diagram (Fig.~\ref{fig:pipeline})
+and experiment plan establish a rigorous evaluation framework targeting
+15--25\% rare-class AP improvement with 50--90\% annotation savings.
+Upcoming work will focus on delivering a working PyTorch baseline
+(Week~1--2) and a stable conditional generator (Week~3--4) as the
+foundation for all downstream experiments.
+
+% -------------------------------------------------------
+% REFERENCES
+% -------------------------------------------------------
+\begin{thebibliography}{00}
+
+\bibitem{severstal_kaggle}
+Severstal and Kaggle, ``Severstal: Steel Defect Detection,''
+Kaggle Competition Dataset, 2019. [Online]. Available:
+\url{https://www.kaggle.com/c/severstal-steel-defect-detection}
+
+\bibitem{severstal_aug_study}
+Anonymous, ``A Systematic Augmentation Study for Steel Defect
+Segmentation on Severstal,'' in \textit{Proc. ACE}, 2023.
+[Online]. Available:
+\url{https://www.ewadirect.com/proceedings/ace/article/view/23131}
+
+\bibitem{boikov2021synthetic}
+V.~Boikov, V.~Payor, R.~Savelev, and A.~Kolesnikov,
+``Synthetic Data Generation for Steel Defect Detection and
+Classification Using Deep Learning,'' \textit{Symmetry}, vol.~13,
+no.~7, p.~1176, 2021.
+
+\bibitem{fusible_gan}
+Y.~Liu et al., ``Few-Shot Steel Surface Defect Detection via
+Fusible-Feature GAN for Image Synthesis,'' \textit{IEEE Access},
+vol.~11, pp.~30,224--30,237, 2023. [Online]. Available:
+\url{https://pmc.ncbi.nlm.nih.gov/articles/PMC10054326/}
+
+\bibitem{dg_gan_surface}
+X.~Chen et al., ``High-Quality Defect Generation for Industrial
+Surface Inspection Using Generative Adversarial Networks,''
+\textit{Sensors}, vol.~23, no.~6, p.~3216, 2023. [Online]. Available:
+\url{https://www.mdpi.com/1424-8220/23/6/3216}
+
+\bibitem{sketch_spade_steel}
+Z.~Li et al., ``Sketch-Guided Spatially Adaptive Defect Synthesis
+for Steel Strip Surfaces,'' \textit{Measurement Science and
+Technology}, vol.~35, no.~5, 2024. DOI:
+\url{https://iopscience.iop.org/article/10.1088/1361-6501/ad1eb6}
+
+\bibitem{diffusion_steel_seg}
+H.~Zhang et al., ``Enhancing Steel Surface Defect Segmentation via
+Latent Diffusion Model Augmentation,'' \textit{Sensors}, vol.~23,
+no.~19, 2023. [Online]. Available:
+\url{https://pmc.ncbi.nlm.nih.gov/articles/PMC11436218/}
+
+\bibitem{khornlund_repo}
+K.~Hornlund, ``Severstal Steel Defect Detection,'' GitHub, 2019.
+[Online]. Available:
+\url{https://github.com/khornlund/severstal-steel-defect-detection}
+
+\bibitem{diyago_repo}
+D.~Ignatov, ``Severstal-Steel-Defect-Detection (Top-2\%
+Solution),'' GitHub, 2019. [Online]. Available:
+\url{https://github.com/Diyago/Severstal-Steel-Defect-Detection}
+
+\bibitem{aleksandra_eda}
+A.~Deis, ``Steel Defect Detection EDA,'' Kaggle Notebook,
+2019. [Online]. Available:
+\url{https://www.kaggle.com/code/aleksandradeis/steel-defect-detection-eda}
+
+\end{thebibliography}
+
+\end{document}

@@ -1,10 +1,7 @@
 #!/usr/bin/env python3
 """
 Generate IEEE publication-ready baseline graphs from TensorBoard event files.
-Run locally on your Mac after downloading results from Vast.ai.
-
-Usage:
-    python scripts/generate_baseline_graphs.py
+Fixed: x-axis now shows epoch numbers, not global step counts.
 """
 
 import os
@@ -65,10 +62,10 @@ def load_all_scalars(event_files):
 
 print("\nLoading TensorBoard data...")
 data = load_all_scalars(EVENT_FILES)
-print(f"Loaded {len(data)} metrics:")
+print(f"Loaded {len(data)} metrics")
 for k in sorted(data.keys()):
-    n = len(data[k]["value"])
-    print(f"  {k}: {n} points, steps {data[k]['step'][:3]}...{data[k]['step'][-3:]}")
+    d = data[k]
+    print(f"  {k}: {len(d['value'])} pts, steps {d['step'][:2]}...{d['step'][-2:]}")
 
 # ─── IEEE Publication Style ──────────────────────────────────────────────────
 import numpy as np
@@ -77,9 +74,6 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-# IEEE single-column: 3.5 inches = 89mm
-# IEEE double-column: 7.2 inches = 183mm
-# Font sizes must be >= 6pt at final print size
 plt.rcParams.update(
     {
         "font.family": "sans-serif",
@@ -103,7 +97,6 @@ plt.rcParams.update(
     }
 )
 
-# Colorblind-safe Okabe-Ito
 C = {
     "train": "#0072B2",
     "val": "#D55E00",
@@ -122,67 +115,65 @@ def savefig(fig, name):
     print(f"  ✓ {name}.png/pdf")
 
 
-# ─── Extract Metrics with STEPS ──────────────────────────────────────────────
-def get_metric(tag_name):
-    """Get metric with actual step values (epoch numbers)."""
+# ─── Extract Metrics ───────────────────────────────────────────────────────────
+def get_vals(tag_name):
+    """Get values only (ignore TensorBoard step counts)."""
     d = data.get(tag_name, {})
-    steps = d.get("step", [])
-    values = d.get("value", [])
-    return np.array(steps), np.array(values)
+    return np.array(d.get("value", []))
 
 
-# Training metrics (logged every epoch: steps 0, 1, 2, ..., 62)
-train_loss_steps, train_loss_vals = get_metric("train/epoch/loss")
-train_dice0_steps, train_dice0_vals = get_metric("train/epoch/dice_0")
-train_dice1_steps, train_dice1_vals = get_metric("train/epoch/dice_1")
-train_dice2_steps, train_dice2_vals = get_metric("train/epoch/dice_2")
-train_dice3_steps, train_dice3_vals = get_metric("train/epoch/dice_3")
-train_dice_mean_steps, train_dice_mean_vals = get_metric("train/epoch/dice_mean")
+# Training metrics (logged every epoch)
+train_loss = get_vals("train/epoch/loss")
+train_dice0 = get_vals("train/epoch/dice_0")
+train_dice1 = get_vals("train/epoch/dice_1")
+train_dice2 = get_vals("train/epoch/dice_2")
+train_dice3 = get_vals("train/epoch/dice_3")
+train_dice_mean = get_vals("train/epoch/dice_mean")
 
-# Validation metrics (logged every 10 epochs starting at 100: steps 100, 101, ...)
-val_loss_steps, val_loss_vals = get_metric("valid/loss")
-val_dice0_steps, val_dice0_vals = get_metric("valid/dice_0")
-val_dice1_steps, val_dice1_vals = get_metric("valid/dice_1")
-val_dice2_steps, val_dice2_vals = get_metric("valid/dice_2")
-val_dice3_steps, val_dice3_vals = get_metric("valid/dice_3")
-val_dice_mean_steps, val_dice_mean_vals = get_metric("valid/dice_mean")
+# Validation metrics (logged at epochs 100-106)
+val_loss = get_vals("valid/loss")
+val_dice0 = get_vals("valid/dice_0")
+val_dice1 = get_vals("valid/dice_1")
+val_dice2 = get_vals("valid/dice_2")
+val_dice3 = get_vals("valid/dice_3")
+val_dice_mean = get_vals("valid/dice_mean")
 
-# Get actual epoch range
-total_epochs = int(train_loss_steps[-1]) + 1 if len(train_loss_steps) > 0 else 0
-val_start = int(val_loss_steps[0]) if len(val_loss_steps) > 0 else 100
+# Build x-axis: train = 0,1,2,...,N-1; val = 100,101,...,100+N-1
+train_epochs = np.arange(len(train_loss))
+val_epochs = np.arange(100, 100 + len(val_loss)) if len(val_loss) > 0 else np.array([])
 
-print(f"\nTrain epochs: 0-{total_epochs - 1} ({len(train_loss_vals)} points)")
+n_train_epochs = len(train_loss)
+n_val_runs = len(val_loss)
+
+print(f"\nTrain: {n_train_epochs} epochs (0-{n_train_epochs - 1})")
 print(
-    f"Val epochs: {val_start}-{int(val_loss_steps[-1]) if len(val_loss_steps) > 0 else '?'} ({len(val_loss_vals)} points)"
+    f"Val:   {n_val_runs} runs (epochs {val_epochs[0] if len(val_epochs) > 0 else '?'}-{val_epochs[-1] if len(val_epochs) > 0 else '?'})"
 )
 
 # ─── FIG 1: Loss Curves ───────────────────────────────────────────────────────
 print("\nGenerating Figure 1: Loss Curves...")
 fig, ax = plt.subplots(figsize=(7, 4.5))
 
-# Plot training loss at actual epoch numbers
 ax.plot(
-    train_loss_steps,
-    train_loss_vals,
+    train_epochs,
+    train_loss,
     color=C["train"],
     label="Train Loss",
     linewidth=2,
     zorder=2,
 )
-
-# Plot validation loss at actual epoch numbers with markers
-if len(val_loss_vals) > 0:
+if len(val_loss) > 0:
     ax.plot(
-        val_loss_steps,
-        val_loss_vals,
+        val_epochs,
+        val_loss,
         color=C["val"],
         label="Val Loss",
-        linewidth=2,
+        linewidth=0,
         marker="o",
-        markersize=6,
+        markersize=7,
         markerfacecolor=C["val"],
         markeredgecolor="white",
-        markeredgewidth=1.5,
+        markeredgewidth=2,
         zorder=3,
     )
 
@@ -199,38 +190,34 @@ savefig(fig, "fig1_loss_curves")
 print("Generating Figure 2: Mean Dice Score...")
 fig, ax = plt.subplots(figsize=(7, 4.5))
 
-# Training dice mean
 ax.plot(
-    train_dice_mean_steps,
-    train_dice_mean_vals,
+    train_epochs,
+    train_dice_mean,
     color=C["train"],
     label="Train Mean Dice",
     linewidth=2,
     zorder=2,
 )
-
-# Validation dice mean with markers
-if len(val_dice_mean_vals) > 0:
+if len(val_dice_mean) > 0:
     ax.plot(
-        val_dice_mean_steps,
-        val_dice_mean_vals,
+        val_epochs,
+        val_dice_mean,
         color=C["val"],
         label="Val Mean Dice",
-        linewidth=2,
+        linewidth=0,
         marker="o",
-        markersize=6,
+        markersize=7,
         markerfacecolor=C["val"],
         markeredgecolor="white",
-        markeredgewidth=1.5,
+        markeredgewidth=2,
         zorder=3,
     )
-    # Annotate final val dice
-    final_val = float(val_dice_mean_vals[-1])
-    final_step = int(val_dice_mean_steps[-1])
+    final_val = float(val_dice_mean[-1])
+    final_ep = int(val_epochs[-1])
     ax.annotate(
         f"Final: {final_val:.3f}",
-        xy=(final_step, final_val),
-        xytext=(final_step - 15, final_val - 0.08),
+        xy=(final_ep, final_val),
+        xytext=(final_ep - 15, final_val - 0.08),
         arrowprops=dict(arrowstyle="->", color=C["val"], lw=1.5),
         fontsize=11,
         color=C["val"],
@@ -261,15 +248,15 @@ savefig(fig, "fig2_mean_dice")
 print("Generating Figure 3: Per-Class Dice (Validation)...")
 fig, ax = plt.subplots(figsize=(7, 4.5))
 
-for steps, vals, name, color in [
-    (val_dice0_steps, val_dice0_vals, "Class 1 (Heavy)", C["c0"]),
-    (val_dice1_steps, val_dice1_vals, "Class 2 (Crazing)", C["c1"]),
-    (val_dice2_steps, val_dice2_vals, "Class 3 (Rolled-in)", C["c2"]),
-    (val_dice3_steps, val_dice3_vals, "Class 4 (Pitted)", C["c3"]),
+for vals, name, color in [
+    (val_dice0, "Class 1 (Heavy)", C["c0"]),
+    (val_dice1, "Class 2 (Crazing)", C["c1"]),
+    (val_dice2, "Class 3 (Rolled-in)", C["c2"]),
+    (val_dice3, "Class 4 (Pitted)", C["c3"]),
 ]:
     if len(vals) > 0:
         ax.plot(
-            steps,
+            val_epochs[: len(vals)],
             vals,
             color=color,
             label=name,
@@ -293,14 +280,14 @@ savefig(fig, "fig3_dice_per_class_val")
 print("Generating Figure 4: Per-Class Dice (Training)...")
 fig, ax = plt.subplots(figsize=(7, 4.5))
 
-for steps, vals, name, color in [
-    (train_dice0_steps, train_dice0_vals, "Class 1 (Heavy)", C["c0"]),
-    (train_dice1_steps, train_dice1_vals, "Class 2 (Crazing)", C["c1"]),
-    (train_dice2_steps, train_dice2_vals, "Class 3 (Rolled-in)", C["c2"]),
-    (train_dice3_steps, train_dice3_vals, "Class 4 (Pitted)", C["c3"]),
+for vals, name, color in [
+    (train_dice0, "Class 1 (Heavy)", C["c0"]),
+    (train_dice1, "Class 2 (Crazing)", C["c1"]),
+    (train_dice2, "Class 3 (Rolled-in)", C["c2"]),
+    (train_dice3, "Class 4 (Pitted)", C["c3"]),
 ]:
     if len(vals) > 0:
-        ax.plot(steps, vals, color=color, label=name, linewidth=2)
+        ax.plot(train_epochs[: len(vals)], vals, color=color, label=name, linewidth=2)
 
 ax.set_xlabel("Epoch")
 ax.set_ylabel("Training Dice Score")
@@ -322,7 +309,7 @@ classes = [
     "Class 4\n(Pitted)",
 ]
 final_vals = []
-for vals in [val_dice0_vals, val_dice1_vals, val_dice2_vals, val_dice3_vals]:
+for vals in [val_dice0, val_dice1, val_dice2, val_dice3]:
     final_vals.append(float(vals[-1]) if len(vals) > 0 else 0.0)
 mean_val = float(np.mean(final_vals))
 
@@ -360,10 +347,10 @@ ax.legend(frameon=False, fontsize=11)
 ax.grid(True, alpha=0.3, axis="y")
 savefig(fig, "fig5_final_dice_bar")
 
-# ─── FIG 6: Multi-Panel Summary (IEEE double-column) ─────────────────────────
+# ─── FIG 6: Multi-Panel Summary ──────────────────────────────────────────────
 print("Generating Figure 6: Multi-Panel Summary...")
 
-fig = plt.figure(figsize=(14, 10))  # Double-column width
+fig = plt.figure(figsize=(14, 10))
 gs = fig.add_gridspec(2, 3, hspace=0.45, wspace=0.35)
 
 
@@ -381,11 +368,11 @@ def add_panel_label(ax, letter):
 
 # Panel A: Loss
 ax = fig.add_subplot(gs[0, 0])
-ax.plot(train_loss_steps, train_loss_vals, color=C["train"], linewidth=2, label="Train")
-if len(val_loss_vals) > 0:
+ax.plot(train_epochs, train_loss, color=C["train"], linewidth=2, label="Train")
+if len(val_loss) > 0:
     ax.plot(
-        val_loss_steps,
-        val_loss_vals,
+        val_epochs,
+        val_loss,
         color=C["val"],
         linewidth=2,
         marker="o",
@@ -404,17 +391,11 @@ add_panel_label(ax, "A")
 
 # Panel B: Mean Dice
 ax = fig.add_subplot(gs[0, 1])
-ax.plot(
-    train_dice_mean_steps,
-    train_dice_mean_vals,
-    color=C["train"],
-    linewidth=2,
-    label="Train",
-)
-if len(val_dice_mean_vals) > 0:
+ax.plot(train_epochs, train_dice_mean, color=C["train"], linewidth=2, label="Train")
+if len(val_dice_mean) > 0:
     ax.plot(
-        val_dice_mean_steps,
-        val_dice_mean_vals,
+        val_epochs,
+        val_dice_mean,
         color=C["val"],
         linewidth=2,
         marker="o",
@@ -467,15 +448,15 @@ add_panel_label(ax, "C")
 
 # Panel D: Val per class
 ax = fig.add_subplot(gs[1, 0])
-for steps, vals, name, color in [
-    (val_dice0_steps, val_dice0_vals, "C1", C["c0"]),
-    (val_dice1_steps, val_dice1_vals, "C2", C["c1"]),
-    (val_dice2_steps, val_dice2_vals, "C3", C["c2"]),
-    (val_dice3_steps, val_dice3_vals, "C4", C["c3"]),
+for vals, name, color in [
+    (val_dice0, "C1", C["c0"]),
+    (val_dice1, "C2", C["c1"]),
+    (val_dice2, "C3", C["c2"]),
+    (val_dice3, "C4", C["c3"]),
 ]:
     if len(vals) > 0:
         ax.plot(
-            steps,
+            val_epochs[: len(vals)],
             vals,
             color=color,
             linewidth=1.8,
@@ -496,14 +477,14 @@ add_panel_label(ax, "D")
 
 # Panel E: Train per class
 ax = fig.add_subplot(gs[1, 1])
-for steps, vals, name, color in [
-    (train_dice0_steps, train_dice0_vals, "C1", C["c0"]),
-    (train_dice1_steps, train_dice1_vals, "C2", C["c1"]),
-    (train_dice2_steps, train_dice2_vals, "C3", C["c2"]),
-    (train_dice3_steps, train_dice3_vals, "C4", C["c3"]),
+for vals, name, color in [
+    (train_dice0, "C1", C["c0"]),
+    (train_dice1, "C2", C["c1"]),
+    (train_dice2, "C3", C["c2"]),
+    (train_dice3, "C4", C["c3"]),
 ]:
     if len(vals) > 0:
-        ax.plot(steps, vals, color=color, linewidth=1.8, label=name)
+        ax.plot(train_epochs[: len(vals)], vals, color=color, linewidth=1.8, label=name)
 ax.set_xlabel("Epoch")
 ax.set_ylabel("Train Dice")
 ax.set_title("E. Train Dice by Class", fontweight="bold", fontsize=12)
@@ -517,29 +498,14 @@ ax = fig.add_subplot(gs[1, 2])
 ax.axis("off")
 table_data = [
     ["Metric", "Value"],
-    ["Total Epochs", str(total_epochs)],
-    ["Val Runs", f"{len(val_dice0_vals)}"],
-    [
-        "Val Dice Mean",
-        f"{val_dice_mean_vals[-1]:.4f}" if len(val_dice_mean_vals) > 0 else "N/A",
-    ],
-    ["Val Loss", f"{val_loss_vals[-1]:.4f}" if len(val_loss_vals) > 0 else "N/A"],
-    [
-        "Class 1 (Heavy)",
-        f"{val_dice0_vals[-1]:.4f}" if len(val_dice0_vals) > 0 else "N/A",
-    ],
-    [
-        "Class 2 (Crazing)",
-        f"{val_dice1_vals[-1]:.4f}" if len(val_dice1_vals) > 0 else "N/A",
-    ],
-    [
-        "Class 3 (Rolled-in)",
-        f"{val_dice2_vals[-1]:.4f}" if len(val_dice2_vals) > 0 else "N/A",
-    ],
-    [
-        "Class 4 (Pitted)",
-        f"{val_dice3_vals[-1]:.4f}" if len(val_dice3_vals) > 0 else "N/A",
-    ],
+    ["Total Epochs", str(n_train_epochs)],
+    ["Val Runs", str(n_val_runs)],
+    ["Val Dice Mean", f"{val_dice_mean[-1]:.4f}" if len(val_dice_mean) > 0 else "N/A"],
+    ["Val Loss", f"{val_loss[-1]:.4f}" if len(val_loss) > 0 else "N/A"],
+    ["Class 1 (Heavy)", f"{val_dice0[-1]:.4f}" if len(val_dice0) > 0 else "N/A"],
+    ["Class 2 (Crazing)", f"{val_dice1[-1]:.4f}" if len(val_dice1) > 0 else "N/A"],
+    ["Class 3 (Rolled-in)", f"{val_dice2[-1]:.4f}" if len(val_dice2) > 0 else "N/A"],
+    ["Class 4 (Pitted)", f"{val_dice3[-1]:.4f}" if len(val_dice3) > 0 else "N/A"],
 ]
 table = ax.table(
     cellText=table_data, loc="center", cellLoc="center", colWidths=[0.5, 0.4]
@@ -566,21 +532,15 @@ print(f"\n{'=' * 60}")
 print("DONE! All figures saved to:")
 print(f"  {OUTPUT_DIR}")
 print(f"\nFinal Results:")
-print(f"  Total Epochs:        {total_epochs}")
-print(f"  Val Runs:            {len(val_dice0_vals)}")
+print(f"  Total Epochs:        {n_train_epochs}")
+print(f"  Val Runs:            {n_val_runs}")
 print(
-    f"  Final Val Dice Mean: {val_dice_mean_vals[-1]:.4f}"
-    if len(val_dice_mean_vals) > 0
+    f"  Final Val Dice Mean: {val_dice_mean[-1]:.4f}"
+    if len(val_dice_mean) > 0
     else "  N/A"
 )
-print(
-    f"  Final Val Loss:      {val_loss_vals[-1]:.4f}"
-    if len(val_loss_vals) > 0
-    else "  N/A"
-)
-for i, vals in enumerate(
-    [val_dice0_vals, val_dice1_vals, val_dice2_vals, val_dice3_vals], 1
-):
+print(f"  Final Val Loss:      {val_loss[-1]:.4f}" if len(val_loss) > 0 else "  N/A")
+for i, vals in enumerate([val_dice0, val_dice1, val_dice2, val_dice3], 1):
     print(
         f"  Class {i}:            {vals[-1]:.4f}"
         if len(vals) > 0

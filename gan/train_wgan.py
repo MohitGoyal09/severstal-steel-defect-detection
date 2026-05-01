@@ -174,40 +174,38 @@ def train_gan(config):
             batch_size_current = real_patches.size(0)
 
             # ---------------------
-            # Train Critic (D)
+            # Train Critic (D) — FP32 only (gradient penalty unstable in FP16)
             # ---------------------
             for _ in range(n_critic):
                 optimizer_D.zero_grad()
 
-                with torch.cuda.amp.autocast(enabled=config.get("use_amp", False)):
-                    # Real patches
-                    d_real = D(real_patches, conditions)
-                    d_real_loss = d_real.mean()
+                # Real patches
+                d_real = D(real_patches, conditions)
+                d_real_loss = d_real.mean()
 
-                    # Fake patches
-                    z = torch.randn(batch_size_current, z_dim, device=device)
-                    fake_patches = G(z, conditions)
-                    d_fake = D(fake_patches.detach(), conditions)
-                    d_fake_loss = d_fake.mean()
+                # Fake patches
+                z = torch.randn(batch_size_current, z_dim, device=device)
+                fake_patches = G(z, conditions)
+                d_fake = D(fake_patches.detach(), conditions)
+                d_fake_loss = d_fake.mean()
 
-                    # Gradient penalty
-                    gp = gradient_penalty(
-                        D,
-                        real_patches,
-                        fake_patches.detach(),
-                        conditions,
-                        device,
-                        lambda_gp,
-                    )
+                # Gradient penalty (must be FP32 — second-order grads unstable in FP16)
+                gp = gradient_penalty(
+                    D,
+                    real_patches,
+                    fake_patches.detach(),
+                    conditions,
+                    device,
+                    lambda_gp,
+                )
 
-                    # Total D loss
-                    d_loss = d_fake_loss - d_real_loss + gp
-
+                # Total D loss
+                d_loss = d_fake_loss - d_real_loss + gp
                 d_loss.backward()
                 optimizer_D.step()
 
             # ---------------------
-            # Train Generator (G)
+            # Train Generator (G) — AMP/FP16 okay here
             # ---------------------
             optimizer_G.zero_grad()
 

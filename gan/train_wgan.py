@@ -179,28 +179,30 @@ def train_gan(config):
             for _ in range(n_critic):
                 optimizer_D.zero_grad()
 
-                # Real patches
-                d_real = D(real_patches, conditions)
-                d_real_loss = d_real.mean()
+                with torch.cuda.amp.autocast(enabled=config.get("use_amp", False)):
+                    # Real patches
+                    d_real = D(real_patches, conditions)
+                    d_real_loss = d_real.mean()
 
-                # Fake patches
-                z = torch.randn(batch_size_current, z_dim, device=device)
-                fake_patches = G(z, conditions)
-                d_fake = D(fake_patches.detach(), conditions)
-                d_fake_loss = d_fake.mean()
+                    # Fake patches
+                    z = torch.randn(batch_size_current, z_dim, device=device)
+                    fake_patches = G(z, conditions)
+                    d_fake = D(fake_patches.detach(), conditions)
+                    d_fake_loss = d_fake.mean()
 
-                # Gradient penalty
-                gp = gradient_penalty(
-                    D,
-                    real_patches,
-                    fake_patches.detach(),
-                    conditions,
-                    device,
-                    lambda_gp,
-                )
+                    # Gradient penalty
+                    gp = gradient_penalty(
+                        D,
+                        real_patches,
+                        fake_patches.detach(),
+                        conditions,
+                        device,
+                        lambda_gp,
+                    )
 
-                # Total D loss
-                d_loss = d_fake_loss - d_real_loss + gp
+                    # Total D loss
+                    d_loss = d_fake_loss - d_real_loss + gp
+
                 d_loss.backward()
                 optimizer_D.step()
 
@@ -209,19 +211,22 @@ def train_gan(config):
             # ---------------------
             optimizer_G.zero_grad()
 
-            z = torch.randn(batch_size_current, z_dim, device=device)
-            fake_patches = G(z, conditions)
-            d_fake_for_g = D(fake_patches, conditions)
-            g_loss = -d_fake_for_g.mean()
+            with torch.cuda.amp.autocast(enabled=config.get("use_amp", False)):
+                z = torch.randn(batch_size_current, z_dim, device=device)
+                fake_patches = G(z, conditions)
+                d_fake_for_g = D(fake_patches, conditions)
+                g_loss = -d_fake_for_g.mean()
 
-            # Optional: reconstruction loss using real masks to guide location
-            if real_masks is not None and config.get("use_reconstruction_loss", False):
-                # Heuristic: encourage generated intensity where mask is present
-                # This is a simple L1 on masked region intensity variance
-                rec_loss = ((fake_patches * real_masks).abs().mean()) * config.get(
-                    "recon_weight", 10.0
-                )
-                g_loss = g_loss + rec_loss
+                # Optional: reconstruction loss using real masks to guide location
+                if real_masks is not None and config.get(
+                    "use_reconstruction_loss", False
+                ):
+                    # Heuristic: encourage generated intensity where mask is present
+                    # This is a simple L1 on masked region intensity variance
+                    rec_loss = ((fake_patches * real_masks).abs().mean()) * config.get(
+                        "recon_weight", 10.0
+                    )
+                    g_loss = g_loss + rec_loss
 
             g_loss.backward()
             optimizer_G.step()
